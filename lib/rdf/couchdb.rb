@@ -26,12 +26,6 @@ module RDF
           'all' => {
             'map' => map_function_for(%w(subject predicate object context))
           },
-          'count' => {
-            'map' => map_function_for(%w(subject predicate object context)),
-            'reduce' => 'function(keys, values) {
-                           return sum(values);
-                        }'
-          },
           'by_context' => {
             'map' => map_function_for(%w(context))
           },
@@ -189,12 +183,7 @@ module RDF
       # @see RDF::Enumerable#count
       # @return [Integer]
       def count
-        view_result = @database.view("#{RDF_DESIGN_DOC_NAME}/count")
-        if view_result['rows'] && view_result['rows'].first
-          view_result['rows'].first['value']
-        else
-          0
-        end
+        @database.view('rdf_couchdb_repository/all', :key=>"\u9999")['total_rows']        
       end
 
     private
