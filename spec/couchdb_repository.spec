@@ -23,7 +23,8 @@ describe RDF::CouchDB::Repository do
       end
       
       after :each do
-        @repository.clear
+        @database.recreate!
+        # @repository.clear
       end
 
       # @see lib/rdf/spec/repository.rb in RDF-spec
