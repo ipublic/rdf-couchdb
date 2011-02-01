@@ -6,8 +6,7 @@ module RDF
   module CouchDB
     class Repository < ::RDF::Repository
 
-      RDF_DESIGN_DOC_NAME = 'rdf_couchdb_repository'
-      RDF_DESIGN_DOC_ID = "_design/#{RDF_DESIGN_DOC_NAME}"
+      RDF_DESIGN_DOC_ID = "_design/rdf_couchdb_repository"
 
       def self.map_function_for(parts)
         conditions = parts.sort.collect{|p| "(doc['#{p}'] || doc['#{p}']===null)"}.join(' && ')
@@ -76,7 +75,7 @@ module RDF
           raise ArgumentError.new(":database option must be a CouchRest::Database required")
         end
         @database = options[:database]
-        save_design_doc
+        refresh_design_doc
       end
 
       def supports?(feature)
@@ -90,7 +89,7 @@ module RDF
       # @see RDF::Enumerable#each.
       def each(&block)
         if block_given?
-          @database.view("#{RDF_DESIGN_DOC_NAME}/all", :include_docs=>true) do |result|
+          design_doc.view("all", :include_docs=>true) do |result|
             subject = RDF::NTriples::Reader.unserialize(result['doc']['subject'])
             predicate = RDF::NTriples::Reader.unserialize(result['doc']['predicate'])
             object = RDF::NTriples::Reader.unserialize(result['doc']['object'])
@@ -130,14 +129,14 @@ module RDF
         predicate = RDF::NTriples::Writer.serialize(statement.predicate)
         object = RDF::NTriples::Writer.serialize(statement.object)
         context = RDF::NTriples::Writer.serialize(statement.context)        
-        @database.view("#{RDF_DESIGN_DOC_NAME}/all", :key=>[context, object, predicate, subject], :include_docs=>true) do |result|
+        design_doc.view("all", :key=>[context, object, predicate, subject], :include_docs=>true) do |result|
           @database.delete_doc(result['doc'])          
         end
       end
 
       # @see RDF::Mutable#clear
       def clear_statements
-        @database.view("#{RDF_DESIGN_DOC_NAME}/all", :include_docs=>true) do |result|
+        design_doc.view("all", :include_docs=>true) do |result|
           result['doc']['_deleted'] = true
           @database.save_doc(result['doc'], true)
         end
@@ -168,7 +167,7 @@ module RDF
         view_opts = { :include_docs => true }
         view_opts[:key] = key if key
 
-        @database.view("#{RDF_DESIGN_DOC_NAME}/#{view_name}", view_opts) do |result|
+        design_doc.view(view_name, view_opts) do |result|
           subject = RDF::NTriples::Reader.unserialize(result['doc']['subject'])
           predicate = RDF::NTriples::Reader.unserialize(result['doc']['predicate'])
           object = RDF::NTriples::Reader.unserialize(result['doc']['object'])
@@ -183,20 +182,42 @@ module RDF
       # @see RDF::Enumerable#count
       # @return [Integer]
       def count
-        @database.view('rdf_couchdb_repository/all', :key=>"\u9999")['total_rows']        
+        design_doc.view('all', :key=>"\u9999")['total_rows']        
       end
 
-    private
-
-      def save_design_doc
+      def refresh_design_doc(force = false)
+        @design_doc = CouchRest::Design.new(RDF_DESIGN_DOC)        
+        stored_design_doc = nil
         begin
-          @database.get(RDF_DESIGN_DOC_ID)
+          stored_design_doc = @database.get(RDF_DESIGN_DOC_ID)
+          changes = force
+          @design_doc['views'].each do |name, view|
+            if !compare_views(stored_design_doc['views'][name], view)
+              changes = true
+              stored_design_doc['views'][name] = view
+            end
+          end
+          if changes
+            @database.save_doc(stored_design_doc)
+            @design_doc = stored_design_doc
+          end
         rescue => e
-          design_doc = CouchRest::Design.new(RDF_DESIGN_DOC)
-          design_doc.database = @database
-          design_doc.save
-        end
+          @design_doc = CouchRest::Design.new(RDF_DESIGN_DOC)
+          @design_doc.database = @database
+          @design_doc.save          
+        end        
       end
+
+      def design_doc
+        @design_doc ||= @database.get(RDF_DESIGN_DOC_ID)
+      end
+
+      # Return true if the two views match (borrowed this from couchrest-model)
+      def compare_views(orig, repl)
+        return false if orig.nil? or repl.nil?
+        (orig['map'].to_s.strip == repl['map'].to_s.strip) && (orig['reduce'].to_s.strip == repl['reduce'].to_s.strip)
+      end
+      
     end
   end
 end

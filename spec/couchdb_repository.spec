@@ -19,7 +19,15 @@ describe RDF::CouchDB::Repository do
       end
 
       it 'should create rdf respository design doc' do
-        @database.get(RDF::CouchDB::Repository::RDF_DESIGN_DOC_ID).should_not be_nil
+        @database.get(RDF::CouchDB::Repository::RDF_DESIGN_DOC_ID).should_not be_nil        
+      end
+
+      it 'should update the rdf repository design doc is it has changed in code' do
+        @database.delete_doc(@repository.design_doc)
+        @database.save_doc({ '_id' => RDF::CouchDB::Repository::RDF_DESIGN_DOC_ID, 'views'=>{ }})
+        @database.get(RDF::CouchDB::Repository::RDF_DESIGN_DOC_ID)['views'].should == { }
+        @repository = RDF::CouchDB::Repository.new(:database=>@database)
+        @database.get(RDF::CouchDB::Repository::RDF_DESIGN_DOC_ID)['views'].should_not be_nil
       end
       
       after :each do
