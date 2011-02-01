@@ -199,8 +199,8 @@ module RDF
           end
           if changes
             @database.save_doc(stored_design_doc)
-            @design_doc = stored_design_doc
           end
+          @design_doc = stored_design_doc          
         rescue => e
           @design_doc = CouchRest::Design.new(RDF_DESIGN_DOC)
           @design_doc.database = @database
