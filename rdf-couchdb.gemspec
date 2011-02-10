@@ -2,7 +2,7 @@
 # -*- encoding: utf-8 -*-
 
 GEMSPEC = Gem::Specification.new do |gem|
-  gem.version            = '0.0.3'
+  gem.version            = '0.0.4'
 
   gem.name               = 'rdf-couchdb'
   gem.homepage           = 'https://github.com/ipublic/rdf-couchdb'
