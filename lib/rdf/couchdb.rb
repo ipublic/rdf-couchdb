@@ -1,6 +1,7 @@
 require 'rdf'
 require 'enumerator'
 require 'couchrest'
+require 'digest/sha2'
 
 module RDF
   module CouchDB
@@ -31,39 +32,39 @@ module RDF
           'by_object' => {
             'map' => map_function_for(%w(object))
           },
-          'by_context_object' => {
-            'map' => map_function_for(%w(object context))
-          },
+          # 'by_context_object' => {
+          #   'map' => map_function_for(%w(object context))
+          # },
           'by_predicate' => {
             'map' => map_function_for(%w(predicate))
           },
-          'by_context_predicate' => {
-            'map' => map_function_for(%w(predicate context))
-          },
+          # 'by_context_predicate' => {
+          #   'map' => map_function_for(%w(predicate context))
+          # },
           'by_object_predicate' => {
             'map' => map_function_for(%w(predicate object))
           },
-          'by_context_object_predicate' => {
-            'map' => map_function_for(%w(predicate object context))
-          },
+          # 'by_context_object_predicate' => {
+          #   'map' => map_function_for(%w(predicate object context))
+          # },
           'by_subject' => {
             'map' => map_function_for(%w(subject))
           },
-          'by_context_subject' => {
-            'map' => map_function_for(%w(subject context))
-          },
+          # 'by_context_subject' => {
+          #   'map' => map_function_for(%w(subject context))
+          # },
           'by_object_subject' => {
             'map' => map_function_for(%w(subject object))
           },
-          'by_context_object_subject' => {
-            'map' => map_function_for(%w(subject object context))
-          },
+          # 'by_context_object_subject' => {
+          #   'map' => map_function_for(%w(subject object context))
+          # },
           'by_predicate_subject' => {
             'map' => map_function_for(%w(subject predicate))
           },
-          'by_context_predicate_subject' => {
-            'map' => map_function_for(%w(subject predicate context))
-          },
+          # 'by_context_predicate_subject' => {
+          #   'map' => map_function_for(%w(subject predicate context))
+          # },
           'by_object_predicate_subject' => {
             'map' => map_function_for(%w(subject predicate object))
           }
@@ -110,10 +111,12 @@ module RDF
           predicate = RDF::NTriples::Writer.serialize(stmt.predicate)
           object = RDF::NTriples::Writer.serialize(stmt.object)
           context = RDF::NTriples::Writer.serialize(stmt.context)
-          @database.save_doc({'subject'=>subject,
-                               'predicate'=>predicate,
-                               'object'=>object,
-                               'context'=>context}, true)
+          doc_id = Digest::SHA2.hexdigest("#{subject}#{predicate}#{object}#{context}")
+          @database.save_doc({'_id' => doc_id,
+                              'subject'=>subject,
+                              'predicate'=>predicate,
+                              'object'=>object,
+                              'context'=>context}, true)
         end
         @database.bulk_save
       end
