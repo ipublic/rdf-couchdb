@@ -3,6 +3,16 @@ require 'enumerator'
 require 'couchrest'
 require 'digest/sha2'
 
+# Add array permutations functionality to find views based on parameter names
+class Array
+  def permutations
+    return [self] if size < 2
+    perm = []
+    each { |e| (self - [e]).permutations.each { |p| perm << ([e] + p) } }
+    perm
+  end
+end
+
 module RDF
   module CouchDB
     class Repository < ::RDF::Repository
@@ -10,8 +20,8 @@ module RDF
       RDF_DESIGN_DOC_ID = "_design/rdf_couchdb_repository"
 
       def self.map_function_for(parts)
-        conditions = parts.sort.collect{|p| "(doc['#{p}'] || doc['#{p}']===null)"}.join(' && ')
-        emit = 'emit(['+ parts.sort.collect{|p| "doc.#{p}"}.join(',') + '],1);'
+        conditions = parts.collect{|p| "(doc['#{p}'] || doc['#{p}']===null)"}.join(' && ')
+        emit = 'emit(['+ parts.collect{|p| "doc.#{p}"}.join(',') + '],1);'
         "function(doc) {
                   if (#{conditions}) {
                     #{emit}
@@ -23,52 +33,53 @@ module RDF
         "_id" => RDF_DESIGN_DOC_ID,
         "language" => "javascript",
         "views" => {
-          'all' => {
+          # handles ----, s---, sp--, spo-, spoc
+          'by_subject_predicate_object_context' => {
             'map' => map_function_for(%w(subject predicate object context))
           },
-          'by_context' => {
-            'map' => map_function_for(%w(context))
+
+          # handles p---, po--, poc-
+          'by_predicate_object_context' => {
+            'map' => map_function_for(%w(predicate object context))
           },
-          'by_object' => {
-            'map' => map_function_for(%w(object))
+
+          # handles o---, oc--
+          'by_object_context' => {
+            'map' => map_function_for(%w(object context))
           },
-          # 'by_context_object' => {
-          #   'map' => map_function_for(%w(object context))
-          # },
-          'by_predicate' => {
-            'map' => map_function_for(%w(predicate))
+
+          # handles sc--, sco-
+          'by_subject_context_object' => {
+            'map' => map_function_for(%w(subject context object))
           },
-          # 'by_context_predicate' => {
-          #   'map' => map_function_for(%w(predicate context))
-          # },
-          'by_object_predicate' => {
-            'map' => map_function_for(%w(predicate object))
+
+          # handles c---, cp--, cps-
+          'by_context_predicate_subject' => {
+            'map' => map_function_for(%w(context predicate subject))
           },
-          # 'by_context_object_predicate' => {
-          #   'map' => map_function_for(%w(predicate object context))
-          # },
-          'by_subject' => {
-            'map' => map_function_for(%w(subject))
-          },
-          # 'by_context_subject' => {
-          #   'map' => map_function_for(%w(subject context))
-          # },
+
           'by_object_subject' => {
-            'map' => map_function_for(%w(subject object))
-          },
-          # 'by_context_object_subject' => {
-          #   'map' => map_function_for(%w(subject object context))
-          # },
-          'by_predicate_subject' => {
-            'map' => map_function_for(%w(subject predicate))
-          },
-          # 'by_context_predicate_subject' => {
-          #   'map' => map_function_for(%w(subject predicate context))
-          # },
-          'by_object_predicate_subject' => {
-            'map' => map_function_for(%w(subject predicate object))
+            'map' => map_function_for(%w(object subject))
           }
         }
+      }
+
+      RDF_VIEW_MAP = {
+        %w(subject) => 'by_subject_predicate_object_context',
+        %w(subject predicate) => 'by_subject_predicate_object_context',
+        %w(subject predicate object) => 'by_subject_predicate_object_context',
+        %w(subject predicate object context) => 'by_subject_predicate_object_context',
+        %w(predicate) => 'by_predicate_object_context',
+        %w(predicate object) => 'by_predicate_object_context',
+        %w(predicate object context) => 'by_predicate_object_context',
+        %w(object) => 'by_object_context',
+        %w(object context) => 'by_object_context',
+        %w(subject context) => 'by_subject_context_object',
+        %w(subject context object) => 'by_subject_context_object',
+        %w(context) => 'by_context_predicate_subject',
+        %w(context predicate) => 'by_context_predicate_subject',
+        %w(context predicate subject) => 'by_context_predicate_subject',
+        %w(object subject) => 'by_object_subject'
       }
 
       def initialize(options = {})
@@ -90,12 +101,12 @@ module RDF
       # @see RDF::Enumerable#each.
       def each(&block)
         if block_given?
-          design_doc.view("all", :include_docs=>true) do |result|
+          design_doc.view("by_subject_predicate_object_context", :include_docs=>true) do |result|
             subject = RDF::NTriples::Reader.unserialize(result['doc']['subject'])
             predicate = RDF::NTriples::Reader.unserialize(result['doc']['predicate'])
             object = RDF::NTriples::Reader.unserialize(result['doc']['object'])
             context = RDF::NTriples::Reader.unserialize(result['doc']['context'])
-            block.call(RDF::Statement.new(subject, predicate, object, :context=>context))
+            block.call(RDF::Statement.new(subject, predicate, object, :context=>context, :id=>result['doc']['_id']))
           end          
         else
           ::Enumerable::Enumerator.new(self,:each)
@@ -128,20 +139,35 @@ module RDF
 
       # @see RDF::Mutable#delete_statement
       def delete_statement(statement)
-        subject = RDF::NTriples::Writer.serialize(statement.subject)
-        predicate = RDF::NTriples::Writer.serialize(statement.predicate)
-        object = RDF::NTriples::Writer.serialize(statement.object)
-        context = RDF::NTriples::Writer.serialize(statement.context)        
-        design_doc.view("all", :key=>[context, object, predicate, subject], :include_docs=>true) do |result|
-          @database.delete_doc(result['doc'])          
-        end
+        delete_statements([statement])
       end
+
+      # @see RDF::Mutable#delete_statements
+      def delete_statements(statements)
+        doc_ids = statements.collect do |statement|
+          unless statement.id
+            subject = RDF::NTriples::Writer.serialize(statement.subject)
+            predicate = RDF::NTriples::Writer.serialize(statement.predicate)
+            object = RDF::NTriples::Writer.serialize(statement.object)
+            context = RDF::NTriples::Writer.serialize(statement.context)
+            statement.id = Digest::SHA2.hexdigest("#{subject}#{predicate}#{object}#{context}")                              
+          end
+          statement.id
+        end
+        @database.documents(:keys=>doc_ids, :include_docs=>false)['rows'].each do |result|
+          if result['id'] && result['value']
+            @database.save_doc({'_id'=>result['id'], '_rev'=>result['value']['rev'], '_deleted'=>true }, true)
+          end
+        end
+        @database.bulk_save
+      end
+
+
 
       # @see RDF::Mutable#clear
       def clear_statements
-        design_doc.view("all", :include_docs=>true) do |result|
-          result['doc']['_deleted'] = true
-          @database.save_doc(result['doc'], true)
+        @database.documents(:include_docs=>false)['rows'].each do |result|
+          @database.save_doc({'_id'=>result['id'], '_rev'=>result['value']['rev'], '_deleted'=>true }, true)
         end
         @database.bulk_save
       end
@@ -159,23 +185,37 @@ module RDF
       # @see RDF::Queryable#query
       def query_pattern(pattern, &block)
         params = pattern.to_hash
-        param_names = params.keys.select{|k| params[k]}.collect{|k| k.to_s}.sort
-        if param_names.size==0
-          view_name = "all"
-          key = nil
-        else
-          view_name = "by_"+param_names.join('_')
-          key = param_names.collect{|pn| RDF::NTriples::Writer.serialize(params[pn.to_sym])}
-        end
-        view_opts = { :include_docs => true }
-        view_opts[:key] = key if key
+        param_names = params.keys.select{|k| params[k]}.collect{|k| k.to_s}
+        # if param_names.size==0
+        #   view_name = "all"
+        #   key = nil
+        # else
+        #   view_name = "by_"+param_names.join('_')
+        #   key = param_names.collect{|pn| RDF::NTriples::Writer.serialize(params[pn.to_sym])}
+        # end
+        
+        # view_opts[:key] = key if key
 
+        view_opts = { :include_docs => true }
+        if param_names.size == 0
+          view_name = 'by_subject_predicate_object_context'
+        else
+          param_perm = param_names.permutations.detect {|perm| RDF_VIEW_MAP[perm]}
+          view_name = RDF_VIEW_MAP[param_perm]
+          view_num_params = view_name.split('_').size-1
+          if param_names.size == view_num_params
+            view_opts[:key] = param_names.collect{|pn| RDF::NTriples::Writer.serialize(params[pn.to_sym])}                      
+          else
+            view_opts[:startkey] = param_names.collect{|pn| RDF::NTriples::Writer.serialize(params[pn.to_sym])}
+            view_opts[:endkey] = param_names.collect{|pn| RDF::NTriples::Writer.serialize(params[pn.to_sym])}.concat(["\u9999"])                                  
+          end          
+        end
         design_doc.view(view_name, view_opts) do |result|
           subject = RDF::NTriples::Reader.unserialize(result['doc']['subject'])
           predicate = RDF::NTriples::Reader.unserialize(result['doc']['predicate'])
           object = RDF::NTriples::Reader.unserialize(result['doc']['object'])
-          context = RDF::NTriples::Reader.unserialize(result['doc']['context'])
-          block.call(RDF::Statement.new(subject, predicate, object, :context=>context))
+          context = RDF::NTriples::Reader.unserialize(result['doc']['context'])          
+          block.call(RDF::Statement.new(subject, predicate, object, :context=>context, :id=>result['doc']['_id']))
         end
       end
 
@@ -185,7 +225,7 @@ module RDF
       # @see RDF::Enumerable#count
       # @return [Integer]
       def count
-        design_doc.view('all', :key=>"\u9999")['total_rows']        
+        design_doc.view('by_subject_predicate_object_context', :key=>"\u9999")['total_rows']        
       end
 
       def refresh_design_doc(force = false)
