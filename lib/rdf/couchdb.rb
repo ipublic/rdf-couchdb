@@ -204,10 +204,10 @@ module RDF
           view_name = RDF_VIEW_MAP[param_perm]
           view_num_params = view_name.split('_').size-1
           if param_names.size == view_num_params
-            view_opts[:key] = param_names.collect{|pn| RDF::NTriples::Writer.serialize(params[pn.to_sym])}                      
+            view_opts[:key] = param_perm.collect{|pn| RDF::NTriples::Writer.serialize(params[pn.to_sym])}                      
           else
-            view_opts[:startkey] = param_names.collect{|pn| RDF::NTriples::Writer.serialize(params[pn.to_sym])}
-            view_opts[:endkey] = param_names.collect{|pn| RDF::NTriples::Writer.serialize(params[pn.to_sym])}.concat(["\u9999"])                                  
+            view_opts[:startkey] = param_perm.collect{|pn| RDF::NTriples::Writer.serialize(params[pn.to_sym])}
+            view_opts[:endkey] = param_perm.collect{|pn| RDF::NTriples::Writer.serialize(params[pn.to_sym])}.concat(["\u9999"])                                  
           end          
         end
         design_doc.view(view_name, view_opts) do |result|
